@@ -33,7 +33,10 @@ const init = async () => {
     numHands: 1
   });
   demosSection.classList.remove("invisible");
-  if (mode == "TOPDOWN") {
+  if (mode == "NORMAL") {
+    video.style.transform = "scaleX(-1)";
+    canvasElement.style.transform = "scaleX(-1)";
+  } else if (mode == "TOPDOWN") {
     video.style.transform = "scaleX(-1) scaleY(-1)";
     canvasElement.style.transform = "scaleX(-1) scaleY(-1)";
   }
@@ -102,18 +105,70 @@ function convertRange(value, oldMin, oldMax, newMin, newMax) {
 let buffer = []
 
 const PINCH_THRESHOLD = 12;
-const BUFFER_SIZE = 9;
+const BUFFER_SIZE = 15;
 const PINCH_BUFFER_TOLERANCE = 0.5
 
 const debugElement = document.getElementById("debug");
 
 async function normal(landmarks) {
+  // to get screen distance, we first need to calibrate, this is to take distance between thumbCmc and thumbMcp
+  // (this is chosen for no particular reason, we can try different distance combos, as long as its length don't decrease)
+  // then we just calculate the scale to be the distance unit
+  // formula: distance unit = dist.calibration/dist.current
+  const distCalibration = 0.15;
+
   const thumbTip = landmarks[0][4];
   const thumbMcp = landmarks[0][2];
-  
+  const thumbCmc = landmarks[0][1];
+
+  const distThumbMcpThumbCmc = euclideanDistance(thumbMcp, thumbCmc);
+  const distToScreen = Math.max((distCalibration / distThumbMcpThumbCmc) - distCalibration, 0) / 20;
+
+  const deltaX = thumbMcp.x - thumbTip.x;
+  const deltaY = thumbMcp.y - thumbTip.y;
+  const deltaZ = thumbMcp.z - thumbTip.z;
+
+  const angleXZ = deltaX / deltaZ;
+  const angleYZ = deltaY / deltaZ;
+
+  const pointerX = 1 - thumbMcp.x + distToScreen * angleXZ;
+  const pointerY = thumbMcp.y - distToScreen * angleYZ;
+
+  const inScreenX = pointerX >= 0 && pointerX <= 1;
+  const inScreenY = pointerY >= 0 && pointerY <= 1;
+
+  let result = {
+    x: pointerX * window.screen.width,
+    y: pointerY * window.screen.height,
+    pinch: false
+  }
+
+  if (buffer.length < BUFFER_SIZE) {
+    buffer.push({ ...result })
+  } else {
+    buffer.shift();
+    buffer.push({ ...result })
+
+    result.x = buffer.map(b => b.x).reduce((a, b) => a + b, 0) / BUFFER_SIZE;
+    result.y = buffer.map(b => b.y).reduce((a, b) => a + b, 0) / BUFFER_SIZE;
+    result.pinch = buffer.map(b => b.pinch).reduce((a, b) => a + b, 0) >= (PINCH_BUFFER_TOLERANCE * BUFFER_SIZE)
+  }
+
   debugElement.innerText =
-    `Thumb Tip (y,z): ${Math.floor(thumbTip.y * 1000)},${Math.floor(thumbTip.z * 1000)}
-Thumb Mcp (y,z): ${Math.floor(thumbMcp.y * 1000)},${Math.floor(thumbMcp.z * 1000)}`;
+    `Thumb Tip (x,y,z): ${Math.floor(thumbTip.x * 1000)},${Math.floor(thumbTip.y * 1000)},${Math.floor(thumbTip.z * 1000)}
+Thumb Mcp (x,y,z): ${Math.floor(thumbMcp.x * 1000)},${Math.floor(thumbMcp.y * 1000)},${Math.floor(thumbMcp.z * 1000)}
+Dist Thumb Mcp - Thumb Cmc: ${distThumbMcpThumbCmc}
+Screen Distance: ${distToScreen}
+Delta X: ${Math.floor(deltaX * 1000)}
+Delta Y: ${Math.floor(deltaY * 1000)}
+Delta Z: ${Math.floor(deltaZ * 1000)}
+AngleXZ: ${angleXZ * (180 / Math.PI)}
+AngleYZ: ${angleYZ * (180 / Math.PI)}
+Cursor Position: ${pointerX},${pointerY}
+In Screen: ${inScreenX && inScreenY}
+Cursor Position (screen): ${Math.floor(result.x)},${Math.floor(result.y)}`;
+
+  await invoke("mouse_action", { x: Math.floor(result.x), y: Math.floor(result.y), pinch: result.pinch });
 }
 
 async function topDown(landmarks) {
