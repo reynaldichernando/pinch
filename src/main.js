@@ -11,6 +11,15 @@ let handLandmarker = undefined;
 let enableWebcamButton;
 let webcamRunning = false;
 
+/**
+ * avilable modes: NORMAL, TOPDOWN
+*/
+const mode = "NORMAL";
+
+const video = document.getElementById("webcam");
+const canvasElement = document.getElementById("output_canvas");
+const canvasCtx = canvasElement.getContext("2d");
+
 const init = async () => {
   const vision = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
@@ -24,12 +33,12 @@ const init = async () => {
     numHands: 1
   });
   demosSection.classList.remove("invisible");
+  if (mode == "TOPDOWN") {
+    video.style.transform = "scaleX(-1) scaleY(-1)";
+    canvasElement.style.transform = "scaleX(-1) scaleY(-1)";
+  }
 };
 init();
-
-const video = document.getElementById("webcam");
-const canvasElement = document.getElementById("output_canvas");
-const canvasCtx = canvasElement.getContext("2d");
 
 // Check if webcam access is supported.
 const hasGetUserMedia = () => !!navigator.mediaDevices?.getUserMedia;
@@ -98,6 +107,15 @@ const PINCH_BUFFER_TOLERANCE = 0.5
 
 const debugElement = document.getElementById("debug");
 
+async function normal(landmarks) {
+  const thumbTip = landmarks[0][4];
+  const thumbMcp = landmarks[0][2];
+  
+  debugElement.innerText =
+    `Thumb Tip (y,z): ${Math.floor(thumbTip.y * 1000)},${Math.floor(thumbTip.z * 1000)}
+Thumb Mcp (y,z): ${Math.floor(thumbMcp.y * 1000)},${Math.floor(thumbMcp.z * 1000)}`;
+}
+
 async function topDown(landmarks) {
   const thumbTip = landmarks[0][4];
   const indexTip = landmarks[0][8];
@@ -162,7 +180,12 @@ async function predictWebcam() {
       });
       drawLandmarks(canvasCtx, landmarks, { color: "#FF0000", lineWidth: 1 });
     }
-    await topDown(results.landmarks);
+
+    if (mode == "NORMAL") {
+      await normal(results.landmarks);
+    } else if (mode == "TOPDOWN") {
+      await topDown(results.landmarks);
+    }
   }
   canvasCtx.restore();
 
