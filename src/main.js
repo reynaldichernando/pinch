@@ -26,7 +26,7 @@ const init = async () => {
   );
   handLandmarker = await HandLandmarker.createFromOptions(vision, {
     baseOptions: {
-      modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+      modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task`,
       delegate: "GPU"
     },
     runningMode: "VIDEO",
@@ -115,32 +115,47 @@ async function normal(landmarks) {
   // (this is chosen for no particular reason, we can try different distance combos, as long as its length don't decrease)
   // then we just calculate the scale to be the distance unit
   // formula: distance unit = dist.calibration/dist.current
-  const distCalibration = 0.15;
 
-  const thumbTip = landmarks[0][4];
-  const thumbMcp = landmarks[0][2];
-  const thumbCmc = landmarks[0][1];
+  // 1. determine pos
+  const calibrationMax = 0.2;
+  const calibrationMin = 0.04;
+  const middlePip = landmarks[0][10];
+  const middleMcp = landmarks[0][9];
 
-  const distThumbMcpThumbCmc = euclideanDistance(thumbMcp, thumbCmc);
-  const distToScreen = Math.max((distCalibration / distThumbMcpThumbCmc) - distCalibration, 0) / 20;
+  const distanceMiddlePipMiddleMcp = euclideanDistance(middlePip, middleMcp);
 
-  const deltaX = thumbMcp.x - thumbTip.x;
-  const deltaY = thumbMcp.y - thumbTip.y;
-  const deltaZ = thumbMcp.z - thumbTip.z;
+  const distToScreen = 0.3 * (1 - convertRange(distanceMiddlePipMiddleMcp, calibrationMin, calibrationMax, 0, 1));
+
+  const deltaX = middleMcp.x - middlePip.x;
+  const deltaY = middleMcp.y - middlePip.y;
+  const deltaZ = middleMcp.z - middlePip.z;
 
   const angleXZ = deltaX / deltaZ;
   const angleYZ = deltaY / deltaZ;
 
-  const pointerX = 1 - thumbMcp.x + distToScreen * angleXZ;
-  const pointerY = thumbMcp.y - distToScreen * angleYZ;
+  const pointerX = 1 - middleMcp.x + distToScreen * angleXZ;
+  const pointerY = middleMcp.y - distToScreen * angleYZ;
 
   const inScreenX = pointerX >= 0 && pointerX <= 1;
   const inScreenY = pointerY >= 0 && pointerY <= 1;
 
+  // 2. determine pinch
+  const middleTip = landmarks[0][12];
+  const middleDip = landmarks[0][11];
+
+  const indexTip = landmarks[0][8];
+  const indexDip = landmarks[0][7];
+
+  const distanceMiddleTipIndexTip = euclideanDistance(middleTip, indexTip);
+  const distanceMiddleTipMiddleDip = euclideanDistance(middleTip, middleDip);
+  const distanceIndexTipIndexDip = euclideanDistance(indexTip, indexDip);
+
+  const relativeDistance = (distanceMiddleTipIndexTip * 10) / (0.5 * (distanceMiddleTipMiddleDip + distanceIndexTipIndexDip));
+
   let result = {
     x: pointerX * window.screen.width,
     y: pointerY * window.screen.height,
-    pinch: false
+    pinch: relativeDistance <= PINCH_THRESHOLD
   }
 
   if (buffer.length < BUFFER_SIZE) {
@@ -155,20 +170,21 @@ async function normal(landmarks) {
   }
 
   debugElement.innerText =
-    `Thumb Tip (x,y,z): ${Math.floor(thumbTip.x * 1000)},${Math.floor(thumbTip.y * 1000)},${Math.floor(thumbTip.z * 1000)}
-Thumb Mcp (x,y,z): ${Math.floor(thumbMcp.x * 1000)},${Math.floor(thumbMcp.y * 1000)},${Math.floor(thumbMcp.z * 1000)}
-Dist Thumb Mcp - Thumb Cmc: ${distThumbMcpThumbCmc}
+    `Middle Pip (x,y,z): ${Math.floor(middlePip.x * 1000)},${Math.floor(middlePip.y * 1000)},${Math.floor(middlePip.z * 1000)}
+Middle Mcp (x,y,z): ${Math.floor(middleMcp.x * 1000)},${Math.floor(middleMcp.y * 1000)},${Math.floor(middleMcp.z * 1000)}
+Dist Middle Pip - Middle Mcp: ${distanceMiddlePipMiddleMcp}
 Screen Distance: ${distToScreen}
 Delta X: ${Math.floor(deltaX * 1000)}
 Delta Y: ${Math.floor(deltaY * 1000)}
 Delta Z: ${Math.floor(deltaZ * 1000)}
-AngleXZ: ${angleXZ * (180 / Math.PI)}
-AngleYZ: ${angleYZ * (180 / Math.PI)}
+AngleXZ: ${Math.atan(angleXZ) * (180 / Math.PI)}
+AngleYZ: ${Math.atan(angleYZ) * (180 / Math.PI)}
 Cursor Position: ${pointerX},${pointerY}
 In Screen: ${inScreenX && inScreenY}
-Cursor Position (screen): ${Math.floor(result.x)},${Math.floor(result.y)}`;
+Cursor Position (screen): ${Math.floor(result.x)},${Math.floor(result.y)}
+Is Pinched: ${result.pinch}`;
 
-  await invoke("mouse_action", { x: Math.floor(result.x), y: Math.floor(result.y), pinch: result.pinch });
+  await invoke("mouse_action", { x: Math.floor(result.x), y: Math.floor(result.y), pinch: false });
 }
 
 async function topDown(landmarks) {
