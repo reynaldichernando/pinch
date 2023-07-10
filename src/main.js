@@ -5,6 +5,8 @@ import {
   FilesetResolver
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
 
+import { OneEuroFilter } from "./OneEuroFilter.js";
+
 const demosSection = document.getElementById("demos");
 
 let handLandmarker = undefined;
@@ -105,12 +107,25 @@ function convertRange(value, oldMin, oldMax, newMin, newMax) {
 let buffer = []
 
 const PINCH_THRESHOLD = 12;
-const BUFFER_SIZE = 15;
+const BUFFER_SIZE = 9;
 const PINCH_BUFFER_TOLERANCE = 0.5
 
 const debugElement = document.getElementById("debug");
 
-async function normal(landmarks) {
+// freq: must be the same as how fast the data is inputted, for me this is 75
+// under is more jitter
+// upper is more lag
+// mincutoff (start 1) -> lower to reduce jitter
+// beta (start 0) -> increase beta to minimize lag
+// dcutoff ?
+
+const fx3 = new OneEuroFilter(75, 0.001, 0.1, 1);
+const fy3 = new OneEuroFilter(75, 0.001, 0.1, 1);
+
+const fx4 = new OneEuroFilter(75, 0.0001, 0.1, 1);
+const fy4 = new OneEuroFilter(75, 0.0001, 0.1, 1);
+
+async function normal(landmarks, timestamp) {
   // to get screen distance, we first need to calibrate, this is to take distance between thumbCmc and thumbMcp
   // (this is chosen for no particular reason, we can try different distance combos, as long as its length don't decrease)
   // then we just calculate the scale to be the distance unit
@@ -124,14 +139,14 @@ async function normal(landmarks) {
 
   const distanceMiddlePipMiddleMcp = euclideanDistance(middlePip, middleMcp);
 
-  const distToScreen = 0.3 * (1 - convertRange(distanceMiddlePipMiddleMcp, calibrationMin, calibrationMax, 0, 1));
+  const distToScreen = 0.4 * (1 - convertRange(distanceMiddlePipMiddleMcp, calibrationMin, calibrationMax, 0, 1));
 
   const deltaX = middleMcp.x - middlePip.x;
   const deltaY = middleMcp.y - middlePip.y;
   const deltaZ = middleMcp.z - middlePip.z;
 
   const angleXZ = deltaX / deltaZ;
-  const angleYZ = deltaY / deltaZ;
+  const angleYZ = deltaY / deltaZ + (45 * Math.PI/180);
 
   const pointerX = 1 - middleMcp.x + distToScreen * angleXZ;
   const pointerY = middleMcp.y - distToScreen * angleYZ;
@@ -153,10 +168,13 @@ async function normal(landmarks) {
   const relativeDistance = (distanceMiddleTipIndexTip * 10) / (0.5 * (distanceMiddleTipMiddleDip + distanceIndexTipIndexDip));
 
   let result = {
-    x: pointerX * window.screen.width,
-    y: pointerY * window.screen.height,
+    x: fx3.filter(pointerX, timestamp) * window.screen.width,
+    y: fy3.filter(pointerY, timestamp) * window.screen.height,
     pinch: relativeDistance <= PINCH_THRESHOLD
   }
+
+  result.x = fx4.filter(result.x, timestamp);
+  result.y = fy4.filter(result.y, timestamp);
 
   if (buffer.length < BUFFER_SIZE) {
     buffer.push({ ...result })
@@ -164,8 +182,8 @@ async function normal(landmarks) {
     buffer.shift();
     buffer.push({ ...result })
 
-    result.x = buffer.map(b => b.x).reduce((a, b) => a + b, 0) / BUFFER_SIZE;
-    result.y = buffer.map(b => b.y).reduce((a, b) => a + b, 0) / BUFFER_SIZE;
+    // result.x = buffer.map(b => b.x).reduce((a, b) => a + b, 0) / BUFFER_SIZE;
+    // result.y = buffer.map(b => b.y).reduce((a, b) => a + b, 0) / BUFFER_SIZE;
     result.pinch = buffer.map(b => b.pinch).reduce((a, b) => a + b, 0) >= (PINCH_BUFFER_TOLERANCE * BUFFER_SIZE)
   }
 
@@ -182,12 +200,13 @@ AngleYZ: ${Math.atan(angleYZ) * (180 / Math.PI)}
 Cursor Position: ${pointerX},${pointerY}
 In Screen: ${inScreenX && inScreenY}
 Cursor Position (screen): ${Math.floor(result.x)},${Math.floor(result.y)}
+Relative Distance: ${relativeDistance}
 Is Pinched: ${result.pinch}`;
 
-  await invoke("mouse_action", { x: Math.floor(result.x), y: Math.floor(result.y), pinch: false });
+  await invoke("mouse_action", { x: Math.floor(result.x), y: Math.floor(result.y), pinch: result.pinch});
 }
 
-async function topDown(landmarks) {
+async function topDown(landmarks, timestamp) {
   const thumbTip = landmarks[0][4];
   const indexTip = landmarks[0][8];
 
@@ -203,8 +222,8 @@ async function topDown(landmarks) {
   const pointerY = convertRange(1 - thumbTip.y, 0.2, 0.8, 0, 1);
 
   let result = {
-    x: pointerX * window.screen.width,
-    y: pointerY * window.screen.height,
+    x: fx3.filter(pointerX, timestamp) * window.screen.width,
+    y: fy3.filter(pointerY, timestamp) * window.screen.height,
     pinch: relativeDistance <= PINCH_THRESHOLD
   }
 
@@ -214,8 +233,8 @@ async function topDown(landmarks) {
     buffer.shift();
     buffer.push({ ...result })
 
-    result.x = buffer.map(b => b.x).reduce((a, b) => a + b, 0) / BUFFER_SIZE;
-    result.y = buffer.map(b => b.y).reduce((a, b) => a + b, 0) / BUFFER_SIZE;
+    // result.x = buffer.map(b => b.x).reduce((a, b) => a + b, 0) / BUFFER_SIZE;
+    // result.y = buffer.map(b => b.y).reduce((a, b) => a + b, 0) / BUFFER_SIZE;
     result.pinch = buffer.map(b => b.pinch).reduce((a, b) => a + b, 0) >= (PINCH_BUFFER_TOLERANCE * BUFFER_SIZE)
   }
 
@@ -253,9 +272,9 @@ async function predictWebcam() {
     }
 
     if (mode == "NORMAL") {
-      await normal(results.landmarks);
+      await normal(results.landmarks, startTimeMs);
     } else if (mode == "TOPDOWN") {
-      await topDown(results.landmarks);
+      await topDown(results.landmarks, startTimeMs);
     }
   }
   canvasCtx.restore();
