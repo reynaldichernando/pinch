@@ -1,22 +1,17 @@
 const { invoke } = window.__TAURI__.tauri;
 
-import {
-  HandLandmarker,
-  FilesetResolver
-} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
-
-import { OneEuroFilter } from "./OneEuroFilter.js";
-
-const demosSection = document.getElementById("demos");
+import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+import { OneEuroFilter } from "./util/OneEuroFilter.js";
+import { euclideanDistance, convertRange } from "./util/helper.js"
 
 let handLandmarker = undefined;
 let enableWebcamButton;
 let webcamRunning = false;
 
 /**
- * avilable modes: NORMAL, TOPDOWN
+ * avilable modes: DOWN, FRONT 
 */
-const mode = "NORMAL";
+const mode = "FRONT";
 
 const video = document.getElementById("webcam");
 const canvasElement = document.getElementById("output_canvas");
@@ -34,31 +29,27 @@ const init = async () => {
     runningMode: "VIDEO",
     numHands: 1
   });
-  demosSection.classList.remove("invisible");
-  if (mode == "NORMAL") {
+  
+  if (mode == "FRONT") {
     video.style.transform = "scaleX(-1)";
     canvasElement.style.transform = "scaleX(-1)";
-  } else if (mode == "TOPDOWN") {
+  } else if (mode == "DOWN") {
     video.style.transform = "scaleX(-1) scaleY(-1)";
     canvasElement.style.transform = "scaleX(-1) scaleY(-1)";
+  }
+
+  const hasGetUserMedia = () => !!navigator.mediaDevices?.getUserMedia;
+
+  if (hasGetUserMedia()) {
+    enableWebcamButton = document.getElementById("webcamButton");
+    enableWebcamButton.addEventListener("click", enableCam);
+  } else {
+    console.warn("getUserMedia() is not supported by your browser");
   }
 };
 init();
 
-// Check if webcam access is supported.
-const hasGetUserMedia = () => !!navigator.mediaDevices?.getUserMedia;
-
-// If webcam supported, add event listener to button for when user
-// wants to activate it.
-if (hasGetUserMedia()) {
-  enableWebcamButton = document.getElementById("webcamButton");
-  enableWebcamButton.addEventListener("click", enableCam);
-} else {
-  console.warn("getUserMedia() is not supported by your browser");
-}
-
-// Enable the live webcam view and start detection.
-function enableCam(event) {
+function enableCam() {
   if (!handLandmarker) {
     console.log("Wait! objectDetector not loaded yet.");
     return;
@@ -72,12 +63,10 @@ function enableCam(event) {
     enableWebcamButton.innerText = "DISABLE PREDICTIONS";
   }
 
-  // getUsermedia parameters.
   const constraints = {
     video: true
   };
 
-  // Activate the webcam stream.
   navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
     video.srcObject = stream;
     video.addEventListener("loadeddata", predictWebcam);
@@ -86,23 +75,6 @@ function enableCam(event) {
 
 let lastVideoTime = -1;
 let results = undefined;
-
-function euclideanDistance(point1, point2) {
-  const deltaX = point2.x - point1.x;
-  const deltaY = point2.y - point1.y;
-  const deltaZ = point2.z - point1.z;
-
-  const distance = Math.sqrt(deltaX ** 2 + deltaY ** 2 + deltaZ ** 2);
-  return distance;
-}
-
-function convertRange(value, oldMin, oldMax, newMin, newMax) {
-  const result = (value - oldMin) / (oldMax - oldMin) * (newMax - newMin) + newMin;
-  if (result < newMin) return newMin;
-  if (result > newMax) return newMax;
-
-  return result;
-}
 
 let buffer = []
 
@@ -119,13 +91,13 @@ const debugElement = document.getElementById("debug");
 // beta (start 0) -> increase beta to minimize lag
 // dcutoff ?
 
-const fx3 = new OneEuroFilter(75, 0.001, 0.1, 1);
-const fy3 = new OneEuroFilter(75, 0.001, 0.1, 1);
+const fx = new OneEuroFilter(60, 0.001, 0.1, 1);
+const fy = new OneEuroFilter(60, 0.001, 0.1, 1);
 
-const fx4 = new OneEuroFilter(75, 0.0001, 0.1, 1);
-const fy4 = new OneEuroFilter(75, 0.0001, 0.1, 1);
+const fxz = new OneEuroFilter(60, 0.001, 0.1, 1);
+const fyz = new OneEuroFilter(60, 0.001, 0.1, 1);
 
-async function normal(landmarks, timestamp) {
+async function frontFacing(landmarks, timestamp) {
   // to get screen distance, we first need to calibrate, this is to take distance between thumbCmc and thumbMcp
   // (this is chosen for no particular reason, we can try different distance combos, as long as its length don't decrease)
   // then we just calculate the scale to be the distance unit
@@ -145,11 +117,11 @@ async function normal(landmarks, timestamp) {
   const deltaY = middleMcp.y - middlePip.y;
   const deltaZ = middleMcp.z - middlePip.z;
 
-  const angleXZ = deltaX / deltaZ;
-  const angleYZ = deltaY / deltaZ + (45 * Math.PI/180);
+  const angleXZ = fxz.filter(deltaX / deltaZ, timestamp);
+  const angleYZ = fyz.filter(deltaY / deltaZ, timestamp);
 
-  const pointerX = 1 - middleMcp.x + distToScreen * angleXZ;
-  const pointerY = middleMcp.y - distToScreen * angleYZ;
+  const pointerX = convertRange(1 - middleMcp.x + distToScreen * angleXZ, 0.1, 0.9, 0, 1);
+  const pointerY = convertRange(middleMcp.y - distToScreen * angleYZ - 0.5, 0.2, 0.8, 0, 1);
 
   const inScreenX = pointerX >= 0 && pointerX <= 1;
   const inScreenY = pointerY >= 0 && pointerY <= 1;
@@ -168,13 +140,10 @@ async function normal(landmarks, timestamp) {
   const relativeDistance = (distanceMiddleTipIndexTip * 10) / (0.5 * (distanceMiddleTipMiddleDip + distanceIndexTipIndexDip));
 
   let result = {
-    x: fx3.filter(pointerX, timestamp) * window.screen.width,
-    y: fy3.filter(pointerY, timestamp) * window.screen.height,
+    x: fx.filter(pointerX, timestamp) * window.screen.width,
+    y: fy.filter(pointerY, timestamp) * window.screen.height,
     pinch: relativeDistance <= PINCH_THRESHOLD
   }
-
-  result.x = fx4.filter(result.x, timestamp);
-  result.y = fy4.filter(result.y, timestamp);
 
   if (buffer.length < BUFFER_SIZE) {
     buffer.push({ ...result })
@@ -203,10 +172,10 @@ Cursor Position (screen): ${Math.floor(result.x)},${Math.floor(result.y)}
 Relative Distance: ${relativeDistance}
 Is Pinched: ${result.pinch}`;
 
-  await invoke("mouse_action", { x: Math.floor(result.x), y: Math.floor(result.y), pinch: result.pinch});
+  await invoke("mouse_action", { x: Math.floor(result.x), y: Math.floor(result.y), pinch: result.pinch });
 }
 
-async function topDown(landmarks, timestamp) {
+async function downFacing(landmarks, timestamp) {
   const thumbTip = landmarks[0][4];
   const indexTip = landmarks[0][8];
 
@@ -222,10 +191,13 @@ async function topDown(landmarks, timestamp) {
   const pointerY = convertRange(1 - thumbTip.y, 0.2, 0.8, 0, 1);
 
   let result = {
-    x: fx3.filter(pointerX, timestamp) * window.screen.width,
-    y: fy3.filter(pointerY, timestamp) * window.screen.height,
+    x: pointerX * window.screen.width,
+    y: pointerY * window.screen.height,
     pinch: relativeDistance <= PINCH_THRESHOLD
   }
+
+  result.x = fx.filter(result.x, timestamp);
+  result.y = fy.filter(result.y, timestamp);
 
   if (buffer.length < BUFFER_SIZE) {
     buffer.push({ ...result })
@@ -253,7 +225,6 @@ async function predictWebcam() {
   canvasElement.width = video.videoWidth;
   canvasElement.height = video.videoHeight;
 
-  // Now let's start detecting the stream.
   let startTimeMs = performance.now();
   if (lastVideoTime !== video.currentTime) {
     lastVideoTime = video.currentTime;
@@ -271,15 +242,14 @@ async function predictWebcam() {
       drawLandmarks(canvasCtx, landmarks, { color: "#FF0000", lineWidth: 1 });
     }
 
-    if (mode == "NORMAL") {
-      await normal(results.landmarks, startTimeMs);
-    } else if (mode == "TOPDOWN") {
-      await topDown(results.landmarks, startTimeMs);
+    if (mode == "FRONT") {
+      await frontFacing(results.landmarks, startTimeMs);
+    } else if (mode == "DOWN") {
+      await downFacing(results.landmarks, startTimeMs);
     }
   }
   canvasCtx.restore();
 
-  // Call this function again to keep predicting when the browser is ready.
   if (webcamRunning === true) {
     window.requestAnimationFrame(predictWebcam);
   }
