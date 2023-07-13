@@ -1,8 +1,8 @@
 const { invoke } = window.__TAURI__.tauri;
 
 import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
-import { OneEuroFilter } from "./util/OneEuroFilter.js";
-import { euclideanDistance, convertRange } from "./util/helper.js"
+import { OneEuroFilter } from "./lib/OneEuroFilter.js";
+import { euclideanDistance, convertRange } from "./lib/helper.js"
 
 let handLandmarker = undefined;
 let enableWebcamButton;
@@ -78,7 +78,7 @@ let results = undefined;
 
 let buffer = []
 
-const PINCH_THRESHOLD = 12;
+const PINCH_THRESHOLD = 9;
 const BUFFER_SIZE = 9;
 const PINCH_BUFFER_TOLERANCE = 0.5
 
@@ -91,11 +91,29 @@ const debugElement = document.getElementById("debug");
 // beta (start 0) -> increase beta to minimize lag
 // dcutoff ?
 
-const fx = new OneEuroFilter(60, 0.001, 0.1, 1);
-const fy = new OneEuroFilter(60, 0.001, 0.1, 1);
+const fx = new OneEuroFilter(60, 0.001, 0.01, 1);
+const fy = new OneEuroFilter(60, 0.001, 0.01, 1);
 
 const fxz = new OneEuroFilter(60, 0.001, 0.1, 1);
 const fyz = new OneEuroFilter(60, 0.001, 0.1, 1);
+
+const ANGLE_THRESHOLD = 0.02;
+let prevXZAngle = 0;
+let prevYZAngle = 0;
+
+function xzAngleThreshold(xzAngle) {
+  if (Math.abs(xzAngle - prevXZAngle) > ANGLE_THRESHOLD) {
+    prevXZAngle = xzAngle;
+  }
+  return prevXZAngle;
+}
+
+function yzAngleThreshold(yzAngle) {
+  if (Math.abs(yzAngle - prevYZAngle) > ANGLE_THRESHOLD) {
+    prevYZAngle = yzAngle;
+  }
+  return prevYZAngle;
+}
 
 async function frontFacing(landmarks, timestamp) {
   // to get screen distance, we first need to calibrate, this is to take distance between thumbCmc and thumbMcp
@@ -117,8 +135,11 @@ async function frontFacing(landmarks, timestamp) {
   const deltaY = middleMcp.y - middlePip.y;
   const deltaZ = middleMcp.z - middlePip.z;
 
-  const angleXZ = fxz.filter(deltaX / deltaZ, timestamp);
-  const angleYZ = fyz.filter(deltaY / deltaZ, timestamp);
+  let angleXZ = fxz.filter(deltaX / deltaZ, timestamp);
+  let angleYZ = fyz.filter(deltaY / deltaZ, timestamp);
+
+  angleXZ = xzAngleThreshold(angleXZ);
+  angleYZ = yzAngleThreshold(angleYZ);
 
   const pointerX = convertRange(1 - middleMcp.x + distToScreen * angleXZ, 0.1, 0.9, 0, 1);
   const pointerY = convertRange(middleMcp.y - distToScreen * angleYZ - 0.5, 0.2, 0.8, 0, 1);
@@ -127,17 +148,17 @@ async function frontFacing(landmarks, timestamp) {
   const inScreenY = pointerY >= 0 && pointerY <= 1;
 
   // 2. determine pinch
-  const middleTip = landmarks[0][12];
-  const middleDip = landmarks[0][11];
-
+  const thumbTip = landmarks[0][4];
   const indexTip = landmarks[0][8];
+
+  const thumbIp = landmarks[0][3];
   const indexDip = landmarks[0][7];
 
-  const distanceMiddleTipIndexTip = euclideanDistance(middleTip, indexTip);
-  const distanceMiddleTipMiddleDip = euclideanDistance(middleTip, middleDip);
+  const distanceThumbTipIndexTip = euclideanDistance(thumbTip, indexTip);
+  const distanceThumbTipThumbIp = euclideanDistance(thumbTip, thumbIp);
   const distanceIndexTipIndexDip = euclideanDistance(indexTip, indexDip);
 
-  const relativeDistance = (distanceMiddleTipIndexTip * 10) / (0.5 * (distanceMiddleTipMiddleDip + distanceIndexTipIndexDip));
+  const relativeDistance = (distanceThumbTipIndexTip * 10) / (0.5 * (distanceThumbTipThumbIp + distanceIndexTipIndexDip));
 
   let result = {
     x: fx.filter(pointerX, timestamp) * window.screen.width,
@@ -172,7 +193,7 @@ Cursor Position (screen): ${Math.floor(result.x)},${Math.floor(result.y)}
 Relative Distance: ${relativeDistance}
 Is Pinched: ${result.pinch}`;
 
-  await invoke("mouse_action", { x: Math.floor(result.x), y: Math.floor(result.y), pinch: result.pinch });
+  await invoke("mouse_action", { x: Math.floor(result.x), y: Math.floor(result.y), pinch: false });
 }
 
 async function downFacing(landmarks, timestamp) {

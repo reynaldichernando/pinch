@@ -14,31 +14,6 @@
   -webkit-text-size-adjust: 100%;
 }
 
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
 a {
   font-weight: 500;
   color: #646cff;
@@ -84,8 +59,13 @@ button {
   outline: none;
 }
 
-#greet-input {
-  margin-right: 5px;
+#debug {
+  margin: 0;
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  user-select: none;
+  font-size: small;
 }
 
 @media (prefers-color-scheme: dark) {
