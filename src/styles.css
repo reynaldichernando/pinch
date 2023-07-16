@@ -61,11 +61,11 @@ button {
 
 #debug {
   margin: 0;
-  position: absolute;
+  /* position: absolute;
   left: 0px;
-  top: 0px;
+  top: 0px; */
   user-select: none;
-  font-size: small;
+  font-size: medium;
 }
 
 @media (prefers-color-scheme: dark) {

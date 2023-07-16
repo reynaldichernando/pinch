@@ -58,8 +58,8 @@ let results = undefined;
 
 let buffer = []
 
-const PINCH_DISTANCE_THRESHOLD = 9;
-const PINCH_BUFFER_SIZE = 9;
+const PINCH_DISTANCE_THRESHOLD = 12;
+const PINCH_BUFFER_SIZE = 11;
 const PINCH_BUFFER_TOLERANCE = 0.5
 
 // freq: camera fps
@@ -67,13 +67,13 @@ const PINCH_BUFFER_TOLERANCE = 0.5
 // beta (start with 0): increase beta to minimize lag
 // dcutoff: keep as default
 
-const fx = new OneEuroFilter(60, 0.001, 0.7, 1);
-const fy = new OneEuroFilter(60, 0.001, 0.7, 1);
+const fx = new OneEuroFilter(60, 0.001, 0.1, 1);
+const fy = new OneEuroFilter(60, 0.001, 0.1, 1);
 
 const fxz = new OneEuroFilter(60, 0.001, 0.1, 1);
 const fyz = new OneEuroFilter(60, 0.001, 0.1, 1);
 
-const ANGLE_THRESHOLD = 0.02;
+const ANGLE_THRESHOLD = 0.03;
 let prevXZAngle = 0;
 let prevYZAngle = 0;
 
@@ -91,35 +91,10 @@ function yzAngleThreshold(yzAngle) {
   return prevYZAngle;
 }
 
+let delayCounter = 0;
+
 async function driver(landmarks, timestamp) {
-  // to get screen distance, we first need to calibrate, this is to take distance between thumbCmc and thumbMcp
-  // (this is chosen for no particular reason, we can try different distance combos, as long as its length don't decrease)
-  // then we just calculate the scale to be the distance unit
-  // formula: distance unit = dist.calibration/dist.current
-
-  // 1. determine pos
-  const maxDistanceMiddlePipMiddleMcp = 0.2;
-  const middlePip = landmarks[0][10];
-  const middleMcp = landmarks[0][9];
-
-  const distanceMiddlePipMiddleMcp = euclideanDistance(middlePip, middleMcp);
-
-  const distToScreen = maxDistanceMiddlePipMiddleMcp - distanceMiddlePipMiddleMcp;
-
-  const deltaX = middleMcp.x - middlePip.x;
-  const deltaY = middleMcp.y - middlePip.y;
-  const deltaZ = middleMcp.z - middlePip.z;
-
-  let angleXZ = fxz.filter(deltaX / deltaZ, timestamp);
-  let angleYZ = fyz.filter(deltaY / deltaZ, timestamp);
-
-  angleXZ = xzAngleThreshold(angleXZ);
-  angleYZ = yzAngleThreshold(angleYZ);
-
-  const pointerX = convertRange(1 - middleMcp.x + distToScreen * angleXZ, 0.1, 0.9, 0, 1);
-  const pointerY = convertRange(middleMcp.y - distToScreen * angleYZ - 0.5, 0.2, 0.8, 0, 1);
-
-  // 2. determine pinch
+  // determine pinch
   const thumbTip = landmarks[0][4];
   const indexTip = landmarks[0][8];
 
@@ -132,26 +107,66 @@ async function driver(landmarks, timestamp) {
 
   const relativeDistance = (distanceThumbTipIndexTip * 10) / (0.5 * (distanceThumbTipThumbIp + distanceIndexTipIndexDip));
 
+  let pinch = relativeDistance <= PINCH_DISTANCE_THRESHOLD;
+
+  if (buffer.length < PINCH_BUFFER_SIZE) {
+    buffer.push(pinch)
+  } else {
+    buffer.shift();
+    buffer.push(pinch)
+
+    pinch = buffer.reduce((a, b) => a + b, 0) >= (PINCH_BUFFER_TOLERANCE * PINCH_BUFFER_SIZE)
+  }
+
+  // to get screen distance, we first need to calibrate, this is to take distance between thumbCmc and thumbMcp
+  // (this is chosen for no particular reason, we can try different distance combos, as long as its length don't decrease)
+  // then we just calculate the scale to be the distance unit
+  // formula: distance unit = dist.calibration/dist.current
+
+  // determine pos
+  const calibrationMax = 0.2; // closest to the screen
+  const middlePip = landmarks[0][10];
+  const middleMcp = landmarks[0][9];
+
+  const distanceMiddlePipMiddleMcp = euclideanDistance(middlePip, middleMcp);
+
+  // two magic numbers here, first the factor, and min size
+  const distToScreen = 0.3 * (1 - convertRange(distanceMiddlePipMiddleMcp, calibrationMax / 5, calibrationMax, 0, 1));
+
+  const deltaX = middleMcp.x - middlePip.x;
+  const deltaY = middleMcp.y - middlePip.y;
+  const deltaZ = middleMcp.z - middlePip.z;
+
+  let angleXZ = fxz.filter(deltaX / deltaZ, timestamp);
+  let angleYZ = fyz.filter(deltaY / deltaZ, timestamp);
+
+  if (relativeDistance < PINCH_DISTANCE_THRESHOLD + 3 && !pinch) {
+    // angle no change zone, to prevent drifting
+    angleXZ = prevXZAngle;
+    angleYZ = prevYZAngle;
+    delayCounter = 15;
+  } else {
+    if (delayCounter > 0) {
+      delayCounter -= 1;
+      angleXZ = prevXZAngle;
+      angleYZ = prevYZAngle;
+    } else {
+      angleXZ = xzAngleThreshold(angleXZ);
+      angleYZ = yzAngleThreshold(angleYZ);
+    }
+  }
+
+  const pointerX = convertRange(1 - middleMcp.x + distToScreen * angleXZ, 0.1, 0.9, 0, 1);
+  const pointerY = convertRange(middleMcp.y - distToScreen * angleYZ - 0.1, 0.2, 0.8, 0, 1);
+
   let result = {
     x: fx.filter(pointerX, timestamp) * window.screen.width,
     y: fy.filter(pointerY, timestamp) * window.screen.height,
-    pinch: relativeDistance <= PINCH_DISTANCE_THRESHOLD
-  }
-
-  if (buffer.length < PINCH_BUFFER_SIZE) {
-    buffer.push(result.pinch)
-  } else {
-    buffer.shift();
-    buffer.push(result.pinch)
-
-    result.pinch = buffer.reduce((a, b) => a + b, 0) >= (PINCH_BUFFER_TOLERANCE * PINCH_BUFFER_SIZE)
+    pinch: pinch
   }
 
   debugElement.innerText =
     `Screen Distance: ${distToScreen}
-Delta X: ${Math.floor(deltaX * 1000)}
-Delta Y: ${Math.floor(deltaY * 1000)}
-Delta Z: ${Math.floor(deltaZ * 1000)}
 AngleXZ: ${Math.atan(angleXZ) * (180 / Math.PI)}
 AngleYZ: ${Math.atan(angleYZ) * (180 / Math.PI)}
 Pinch Distance: ${relativeDistance}
@@ -161,7 +176,7 @@ Pointer (y): ${thumbTip.y}
 Pointer - Screen (x): ${Math.floor(result.x)}
 Pointer - Screen (y): ${Math.floor(result.y)}`;
 
-  await invoke("mouse_action", { x: Math.floor(result.x), y: Math.floor(result.y), pinch: false });
+  await invoke("mouse_action", { x: Math.floor(result.x), y: Math.floor(result.y), pinch: result.pinch });
 }
 
 async function predict() {
