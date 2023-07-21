@@ -5,7 +5,6 @@
     <meta charset="UTF-8">
     <link rel="stylesheet" href="styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Front</title>
 
     <script src="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"
@@ -15,13 +14,19 @@
 </head>
 
 <body>
-    <a href="/">Back to Home</a>
-    <h1>Front</h1>
+    <header>
+        <a href="/">
+            <div id="back-button">&lsaquo;</div>
+            <div>Back</div>
+        </a>
+        <h1>Front</h1>
+        <button id="toggleCursor">Enable&nbsp;</button>
+    </header>
 
-    <button id="toggleCursor">Enable Cursor</button>
-    <div style="position: relative;">
+    <div id="preview" style="position: relative;">
+        <div style="position: absolute; top: 0px;">Loading...</div>
         <video id="webcam" autoplay playsinline></video>
-        <canvas id="output_canvas" style="position: absolute; left: 0px; top: 0px;"></canvas>
+        <canvas id="output_canvas" style="position: absolute; top: 0px;"></canvas>
     </div>
     <pre id="debug"></pre>
 </body>

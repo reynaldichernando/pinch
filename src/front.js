@@ -33,9 +33,9 @@ const init = async () => {
   toggleCursorElement.addEventListener('click', () => {
     cursorEnabled = !cursorEnabled;
     if (cursorEnabled) {
-      toggleCursorElement.innerText = 'Disable Cursor'
+      toggleCursorElement.innerHTML = 'Disable'
     } else {
-      toggleCursorElement.innerText = 'Enable Cursor'
+      toggleCursorElement.innerHTML = 'Enable&nbsp;'
     }
   })
 
@@ -169,14 +169,15 @@ async function driver(landmarks, timestamp) {
     `Screen Distance: ${distToScreen}
 AngleXZ: ${Math.atan(angleXZ) * (180 / Math.PI)}
 AngleYZ: ${Math.atan(angleYZ) * (180 / Math.PI)}
-Pinch Distance: ${relativeDistance}
-Pinched: ${result.pinch}
+Pinched: ${result.pinch}, Distance: ${relativeDistance}
 Pointer (x): ${thumbTip.x}
 Pointer (y): ${thumbTip.y}
 Pointer - Screen (x): ${Math.floor(result.x)}
 Pointer - Screen (y): ${Math.floor(result.y)}`;
 
-  await invoke("mouse_action", { x: Math.floor(result.x), y: Math.floor(result.y), pinch: result.pinch });
+  if (cursorEnabled) {
+    await invoke("mouse_action", { x: Math.floor(result.x), y: Math.floor(result.y), pinch: result.pinch });
+  }
 }
 
 async function predict() {
@@ -203,9 +204,7 @@ async function predict() {
       drawLandmarks(canvasCtx, landmarks, { color: "#FF0000", lineWidth: 1 });
     }
 
-    if (cursorEnabled) {
-      await driver(results.landmarks, startTimeMs);
-    }
+    await driver(results.landmarks, startTimeMs);
   }
   canvasCtx.restore();
 

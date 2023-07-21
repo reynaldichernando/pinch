@@ -5,12 +5,24 @@
   <meta charset="UTF-8" />
   <link rel="stylesheet" href="styles.css" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tauri App</title>
 </head>
 
 <body>
-  <a href="/down.html">Down Facing</a>
-  <a href="/front.html">Front Facing</a>
+  <h1 id="select-mode">Select Mode</h1>
+  <div id="mode-list">
+    <a class="mode-item" href="/down.html">
+      <div>
+        <img src="./assets/down-facing.png" alt="">
+        <p>Down Facing</p>
+      </div>
+    </a>
+    <a class="mode-item" href="/front.html">
+      <div>
+        <img src="./assets/front-facing.png" alt="">
+        <p>Front Facing</p>
+      </div>
+    </a>
+  </div>
 </body>
 
 </html>
