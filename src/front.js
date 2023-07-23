@@ -133,6 +133,7 @@ async function driver(landmarks, timestamp) {
 
   // converting the value to 0-1 to make the pointer calculation works 
   // (pointer is value ranging from 0-1 which will later converted to screen coordinates)
+  // inverting the value because, larger = closer to screen, smaller = further from screen
 
   const distToScreen = 1 - convertRange(distanceMiddlePipMiddleMcp, calibrationMin, calibrationMax, 0, 1);
 
