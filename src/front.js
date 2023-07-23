@@ -118,20 +118,23 @@ async function driver(landmarks, timestamp) {
     pinch = buffer.reduce((a, b) => a + b, 0) >= (PINCH_BUFFER_TOLERANCE * PINCH_BUFFER_SIZE)
   }
 
-  // to get screen distance, we first need to calibrate, this is to take distance between thumbCmc and thumbMcp
+  // to get screen distance, we first need to calibrate, this is to take distance between two finger points
   // (this is chosen for no particular reason, we can try different distance combos, as long as its length don't decrease)
   // then we just calculate the scale to be the distance unit
-  // formula: distance unit = dist.calibration/dist.current
 
   // determine pos
-  const calibrationMax = 0.2; // closest to the screen
+  const calibrationMax = 0.2; // closest to the screen, this is using middlePip and middleMcp
+  const calibrationMin = calibrationMax / 5; // magic number here, setting the calibration min to be the smallest value the distance could be
+
   const middlePip = landmarks[0][10];
   const middleMcp = landmarks[0][9];
 
   const distanceMiddlePipMiddleMcp = euclideanDistance(middlePip, middleMcp);
 
-  // two magic numbers here, first the factor, and min size
-  const distToScreen = 0.3 * (1 - convertRange(distanceMiddlePipMiddleMcp, calibrationMax / 5, calibrationMax, 0, 1));
+  // converting the value to 0-1 to make the pointer calculation works 
+  // (pointer is value ranging from 0-1 which will later converted to screen coordinates)
+
+  const distToScreen = 1 - convertRange(distanceMiddlePipMiddleMcp, calibrationMin, calibrationMax, 0, 1);
 
   const deltaX = middleMcp.x - middlePip.x;
   const deltaY = middleMcp.y - middlePip.y;
@@ -144,7 +147,7 @@ async function driver(landmarks, timestamp) {
     // angle no change zone, to prevent drifting
     angleXZ = prevXZAngle;
     angleYZ = prevYZAngle;
-    delayCounter = 15;
+    delayCounter = 15; // delay after pinch, for it to return using normal result
   } else {
     if (delayCounter > 0) {
       delayCounter -= 1;
@@ -156,8 +159,11 @@ async function driver(landmarks, timestamp) {
     }
   }
 
-  const pointerX = convertRange(1 - middleMcp.x + distToScreen * angleXZ, 0.1, 0.9, 0, 1);
-  const pointerY = convertRange(middleMcp.y - distToScreen * angleYZ - 0.1, 0.2, 0.8, 0, 1);
+  const angleFactor = 0.3;
+  const axisYOffset = 0.1;
+
+  const pointerX = convertRange(1 - middleMcp.x + distToScreen * angleXZ * angleFactor, 0.1, 0.9, 0, 1);
+  const pointerY = convertRange(middleMcp.y - distToScreen * angleYZ * angleFactor - axisYOffset, 0.2, 0.8, 0, 1);
 
   let result = {
     x: fx.filter(pointerX, timestamp) * window.screen.width,
