@@ -1,7 +1,16 @@
-# Tauri + Vanilla
+# Pinch
 
-This template should help get you started developing with Tauri in vanilla HTML, CSS and Javascript.
+Simulate mouse input using hand tracking, move hand to control the cursor, pinch the thumb and index finger to click.
 
-## Recommended IDE Setup
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+![](https://imgur.com/vKoRDzj.jpeg)
+![](https://imgur.com/NWiYF0z.jpeg)
+
+
+## Installation
+Follow the [Tauri prerequisites guide](https://tauri.app/v1/guides/getting-started/prerequisites) to setup for development. 
+
+## Usage
+```
+npm run tauri dev
+```
